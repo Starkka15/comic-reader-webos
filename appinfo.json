@@ -1,0 +1,10 @@
+{
+    "id": "org.webos.comicreader",
+    "version": "0.1.0",
+    "vendor": "webOS Community",
+    "type": "pdk",
+    "main": "comic-reader",
+    "title": "Comic Reader",
+    "icon": "icon.png",
+    "requiredMemory": 64
+}

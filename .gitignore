@@ -1,0 +1,14 @@
+# Build artifacts
+*.o
+*.ipk
+comic-reader
+
+# Editor files
+*.swp
+*~
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
