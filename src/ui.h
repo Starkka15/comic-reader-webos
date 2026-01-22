@@ -56,10 +56,19 @@ typedef struct {
     int touch_start_y;
     int touch_moved;
 
-    // Zoom/pan (for future)
+    // Multi-touch state (for pinch zoom)
+    SDL_Joystick *touchpad;
+    int touch1_x, touch1_y;
+    int touch2_x, touch2_y;
+    int pinch_active;
+    float pinch_start_dist;
+    float pinch_start_zoom;
+
+    // Zoom/pan state
     float zoom;
-    int pan_x;
-    int pan_y;
+    float pan_x;
+    float pan_y;
+    int rotation;  // 0, 90, 180, 270 degrees
 } UIState;
 
 // Initialize/cleanup

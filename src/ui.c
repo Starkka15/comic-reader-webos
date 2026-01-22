@@ -5,6 +5,7 @@
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <math.h>
 
 // Colors
 static SDL_Color COLOR_WHITE = {255, 255, 255, 255};
@@ -42,6 +43,15 @@ int ui_init(UIState *ui) {
         return -1;
     }
 
+    // Initialize joystick for multi-touch
+    SDL_JoystickEventState(SDL_ENABLE);
+    if (SDL_NumJoysticks() > 0) {
+        ui->touchpad = SDL_JoystickOpen(0);
+        if (ui->touchpad) {
+            printf("Touchpad opened: %d axes\n", SDL_JoystickNumAxes(ui->touchpad));
+        }
+    }
+
     ui->font = load_font(22);
     ui->font_small = load_font(16);
 
@@ -52,6 +62,7 @@ int ui_init(UIState *ui) {
 
     ui->state = SCREEN_BROWSER;
     ui->zoom = 1.0f;
+    ui->rotation = 0;
     strcpy(ui->current_dir, "/media/internal");
 
     return 0;
@@ -59,6 +70,7 @@ int ui_init(UIState *ui) {
 
 void ui_cleanup(UIState *ui) {
     ui_close_comic(ui);
+    if (ui->touchpad) SDL_JoystickClose(ui->touchpad);
     if (ui->font) TTF_CloseFont(ui->font);
     if (ui->font_small) TTF_CloseFont(ui->font_small);
     TTF_Quit();
@@ -187,6 +199,10 @@ int ui_open_comic(UIState *ui, const char *filepath) {
 
     cache_init(&ui->cache, &ui->comic);
     ui->current_page = 0;
+    ui->zoom = 1.0f;
+    ui->pan_x = 0;
+    ui->pan_y = 0;
+    ui->rotation = 0;
     ui_set_screen(ui, SCREEN_READER);
 
     return 0;
@@ -198,15 +214,24 @@ void ui_close_comic(UIState *ui) {
     ui->current_page = 0;
 }
 
+static void reset_view(UIState *ui) {
+    ui->zoom = 1.0f;
+    ui->pan_x = 0;
+    ui->pan_y = 0;
+    // Keep rotation - user might want consistent rotation for whole comic
+}
+
 void ui_next_page(UIState *ui) {
     if (ui->current_page < ui->comic.page_count - 1) {
         ui->current_page++;
+        reset_view(ui);
     }
 }
 
 void ui_prev_page(UIState *ui) {
     if (ui->current_page > 0) {
         ui->current_page--;
+        reset_view(ui);
     }
 }
 
@@ -280,17 +305,105 @@ static void render_browser(UIState *ui) {
     draw_text(ui->screen, ui->font_small, "Tap to select | Swipe to scroll", 20, SCREEN_HEIGHT - 24, COLOR_GRAY);
 }
 
+// Rotate a surface by 90 degrees clockwise
+static SDL_Surface *rotate_surface_90(SDL_Surface *src) {
+    SDL_Surface *dst = SDL_CreateRGBSurface(SDL_SWSURFACE, src->h, src->w,
+        src->format->BitsPerPixel,
+        src->format->Rmask, src->format->Gmask, src->format->Bmask, src->format->Amask);
+    if (!dst) return NULL;
+
+    SDL_LockSurface(src);
+    SDL_LockSurface(dst);
+
+    int bpp = src->format->BytesPerPixel;
+    for (int y = 0; y < src->h; y++) {
+        for (int x = 0; x < src->w; x++) {
+            Uint8 *src_pixel = (Uint8 *)src->pixels + y * src->pitch + x * bpp;
+            Uint8 *dst_pixel = (Uint8 *)dst->pixels + x * dst->pitch + (src->h - 1 - y) * bpp;
+            memcpy(dst_pixel, src_pixel, bpp);
+        }
+    }
+
+    SDL_UnlockSurface(dst);
+    SDL_UnlockSurface(src);
+    return dst;
+}
+
 static void render_reader(UIState *ui) {
     // Get current page
     SDL_Surface *page = cache_get_page(&ui->cache, ui->current_page);
 
     if (page) {
-        // Center the page on screen
-        int x = (SCREEN_WIDTH - page->w) / 2;
-        int y = (SCREEN_HEIGHT - page->h) / 2;
+        SDL_Surface *display_page = page;
+        SDL_Surface *rotated = NULL;
 
-        SDL_Rect dest = {x, y, 0, 0};
-        SDL_BlitSurface(page, NULL, ui->screen, &dest);
+        // Apply rotation if needed
+        if (ui->rotation == 90) {
+            rotated = rotate_surface_90(page);
+            display_page = rotated;
+        } else if (ui->rotation == 180) {
+            SDL_Surface *tmp = rotate_surface_90(page);
+            rotated = rotate_surface_90(tmp);
+            SDL_FreeSurface(tmp);
+            display_page = rotated;
+        } else if (ui->rotation == 270) {
+            SDL_Surface *tmp1 = rotate_surface_90(page);
+            SDL_Surface *tmp2 = rotate_surface_90(tmp1);
+            SDL_FreeSurface(tmp1);
+            rotated = rotate_surface_90(tmp2);
+            SDL_FreeSurface(tmp2);
+            display_page = rotated;
+        }
+
+        // Calculate zoomed dimensions
+        int zoomed_w = (int)(display_page->w * ui->zoom);
+        int zoomed_h = (int)(display_page->h * ui->zoom);
+
+        // Center position with pan offset
+        int x = (SCREEN_WIDTH - zoomed_w) / 2 + (int)ui->pan_x;
+        int y = (SCREEN_HEIGHT - zoomed_h) / 2 + (int)ui->pan_y;
+
+        if (ui->zoom == 1.0f) {
+            // No zoom - direct blit
+            SDL_Rect dest = {x, y, 0, 0};
+            SDL_BlitSurface(display_page, NULL, ui->screen, &dest);
+        } else {
+            // Zoomed - use software stretch
+            SDL_Rect src_rect = {0, 0, display_page->w, display_page->h};
+            SDL_Rect dst_rect = {x, y, zoomed_w, zoomed_h};
+
+            // Clip to screen bounds
+            if (dst_rect.x < 0) {
+                src_rect.x = (int)((-dst_rect.x) / ui->zoom);
+                src_rect.w -= src_rect.x;
+                dst_rect.w += dst_rect.x;
+                dst_rect.x = 0;
+            }
+            if (dst_rect.y < 0) {
+                src_rect.y = (int)((-dst_rect.y) / ui->zoom);
+                src_rect.h -= src_rect.y;
+                dst_rect.h += dst_rect.y;
+                dst_rect.y = 0;
+            }
+            if (dst_rect.x + dst_rect.w > SCREEN_WIDTH) {
+                int overflow = dst_rect.x + dst_rect.w - SCREEN_WIDTH;
+                dst_rect.w -= overflow;
+                src_rect.w = (int)(dst_rect.w / ui->zoom);
+            }
+            if (dst_rect.y + dst_rect.h > SCREEN_HEIGHT - 40) {
+                int overflow = dst_rect.y + dst_rect.h - (SCREEN_HEIGHT - 40);
+                dst_rect.h -= overflow;
+                src_rect.h = (int)(dst_rect.h / ui->zoom);
+            }
+
+            if (dst_rect.w > 0 && dst_rect.h > 0 && src_rect.w > 0 && src_rect.h > 0) {
+                SDL_SoftStretch(display_page, &src_rect, ui->screen, &dst_rect);
+            }
+        }
+
+        if (rotated) {
+            SDL_FreeSurface(rotated);
+        }
 
         // Preload adjacent pages
         cache_preload_adjacent(&ui->cache, ui->current_page);
@@ -302,13 +415,14 @@ static void render_reader(UIState *ui) {
     draw_rect(ui->screen, 0, SCREEN_HEIGHT - 40, SCREEN_WIDTH, 40, COLOR_DARK_GRAY);
 
     char page_info[64];
-    snprintf(page_info, sizeof(page_info), "Page %d / %d",
-             ui->current_page + 1, ui->comic.page_count);
+    snprintf(page_info, sizeof(page_info), "Page %d / %d  (%.0f%%)",
+             ui->current_page + 1, ui->comic.page_count, ui->zoom * 100);
     draw_text(ui->screen, ui->font, page_info, 20, SCREEN_HEIGHT - 32, COLOR_WHITE);
 
-    // Navigation hints
+    // Navigation hints and buttons
     draw_text(ui->screen, ui->font_small, "< Prev", 400, SCREEN_HEIGHT - 30, COLOR_GRAY);
     draw_text(ui->screen, ui->font_small, "Next >", 520, SCREEN_HEIGHT - 30, COLOR_GRAY);
+    draw_text(ui->screen, ui->font_small, "[Rotate]", SCREEN_WIDTH - 180, SCREEN_HEIGHT - 30, COLOR_BLUE);
     draw_text(ui->screen, ui->font_small, "[Back]", SCREEN_WIDTH - 80, SCREEN_HEIGHT - 30, COLOR_YELLOW);
 }
 
@@ -405,9 +519,12 @@ int ui_handle_event(UIState *ui, SDL_Event *event) {
             if (!ui->touch_moved) {
                 // Tap navigation
                 if (y > SCREEN_HEIGHT - 50) {
-                    // Bottom bar - check for back button
+                    // Bottom bar buttons
                     if (x > SCREEN_WIDTH - 100) {
                         return 3; // Back to browser
+                    } else if (x > SCREEN_WIDTH - 200 && x < SCREEN_WIDTH - 110) {
+                        // Rotate button
+                        ui->rotation = (ui->rotation + 90) % 360;
                     }
                 } else if (x < SCREEN_WIDTH / 3) {
                     // Left third - previous page
@@ -445,6 +562,110 @@ int ui_handle_event(UIState *ui, SDL_Event *event) {
             if (event->key.keysym.sym == SDLK_ESCAPE) {
                 return 1; // Quit
             }
+        }
+    }
+
+    // Multi-touch handling via joystick (webOS TouchPad)
+    if (ui->state == SCREEN_READER && ui->touchpad) {
+        if (event->type == SDL_JOYAXISMOTION) {
+            // Axes 0,1 = touch1 x,y; axes 2,3 = touch2 x,y
+            // Values are -32768 to 32767, map to screen coords
+            int axis = event->jaxis.axis;
+            int value = event->jaxis.value;
+
+            // Convert axis value to screen coordinate
+            int coord = (value + 32768) * ((axis % 2 == 0) ? SCREEN_WIDTH : SCREEN_HEIGHT) / 65536;
+
+            switch (axis) {
+                case 0: ui->touch1_x = coord; break;
+                case 1: ui->touch1_y = coord; break;
+                case 2: ui->touch2_x = coord; break;
+                case 3: ui->touch2_y = coord; break;
+            }
+
+            // Check if both touches are active (non-zero positions)
+            if (ui->touch1_x > 0 && ui->touch1_y > 0 &&
+                ui->touch2_x > 0 && ui->touch2_y > 0) {
+
+                // Calculate distance between touches
+                float dx = ui->touch2_x - ui->touch1_x;
+                float dy = ui->touch2_y - ui->touch1_y;
+                float dist = sqrtf(dx * dx + dy * dy);
+
+                if (!ui->pinch_active) {
+                    // Start pinch
+                    ui->pinch_active = 1;
+                    ui->pinch_start_dist = dist;
+                    ui->pinch_start_zoom = ui->zoom;
+                } else {
+                    // Update zoom based on pinch
+                    if (ui->pinch_start_dist > 10) {
+                        float scale = dist / ui->pinch_start_dist;
+                        ui->zoom = ui->pinch_start_zoom * scale;
+
+                        // Clamp zoom
+                        if (ui->zoom < 0.5f) ui->zoom = 0.5f;
+                        if (ui->zoom > 4.0f) ui->zoom = 4.0f;
+                    }
+                }
+            }
+        }
+
+        // Reset pinch when touch released
+        if (event->type == SDL_JOYBUTTONUP) {
+            ui->pinch_active = 0;
+            ui->touch1_x = ui->touch1_y = 0;
+            ui->touch2_x = ui->touch2_y = 0;
+        }
+    }
+
+    // Pan when zoomed (drag with single touch)
+    if (ui->state == SCREEN_READER && ui->zoom > 1.0f && !ui->pinch_active) {
+        if (event->type == SDL_MOUSEMOTION && (event->motion.state & SDL_BUTTON(1))) {
+            ui->pan_x += event->motion.xrel;
+            ui->pan_y += event->motion.yrel;
+            ui->touch_moved = 1;
+        }
+    }
+
+    // Double-tap to reset zoom (detect quick successive taps)
+    static Uint32 last_tap_time = 0;
+    static int last_tap_x = 0, last_tap_y = 0;
+
+    if (ui->state == SCREEN_READER && event->type == SDL_MOUSEBUTTONDOWN) {
+        Uint32 now = SDL_GetTicks();
+        int x = event->button.x;
+        int y = event->button.y;
+
+        if (now - last_tap_time < 300 &&
+            abs(x - last_tap_x) < 50 && abs(y - last_tap_y) < 50) {
+            // Double tap detected - toggle zoom
+            if (ui->zoom > 1.1f) {
+                ui->zoom = 1.0f;
+                ui->pan_x = 0;
+                ui->pan_y = 0;
+            } else {
+                ui->zoom = 2.0f;
+                // Center zoom on tap location
+                ui->pan_x = (SCREEN_WIDTH / 2 - x);
+                ui->pan_y = (SCREEN_HEIGHT / 2 - y);
+            }
+        }
+        last_tap_time = now;
+        last_tap_x = x;
+        last_tap_y = y;
+    }
+
+    // Rotation via keyboard (R key)
+    if (ui->state == SCREEN_READER && event->type == SDL_KEYDOWN) {
+        if (event->key.keysym.sym == SDLK_r) {
+            ui->rotation = (ui->rotation + 90) % 360;
+        } else if (event->key.keysym.sym == SDLK_0) {
+            // Reset zoom and pan
+            ui->zoom = 1.0f;
+            ui->pan_x = 0;
+            ui->pan_y = 0;
+            ui->rotation = 0;
         }
     }
 
