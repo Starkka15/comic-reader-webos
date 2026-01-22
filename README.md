@@ -4,7 +4,7 @@ A memory-efficient comic book reader for HP TouchPad (webOS PDK).
 
 ## Features
 
-- **CBZ Support**: Reads CBZ/ZIP comic archives
+- **CBZ/CBR Support**: Reads CBZ (ZIP) and CBR (RAR) comic archives
 - **Memory Efficient**: Only keeps 3 pages in memory at a time (LRU cache)
 - **Auto-Scaling**: Images scaled to screen resolution on load
 - **Touch Navigation**: Swipe or tap to turn pages
@@ -43,11 +43,12 @@ palm-install org.webos.comicreader_*.ipk
 ## Supported Formats
 
 - **CBZ** (ZIP archives with images) - Full support
-- **CBR** (RAR archives) - Not yet supported
+- **CBR** (RAR archives) - Full support
 
 ## Technical Details
 
-- Uses minizip for ZIP reading (bundled)
+- Uses minizip for ZIP/CBZ reading (bundled)
+- Uses unarr for RAR/CBR reading (bundled)
 - SDL_image for JPEG/PNG decoding
 - Screen: 1024x768 (TouchPad native)
 - Cache: 3 pages (prev, current, next)

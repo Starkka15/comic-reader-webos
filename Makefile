@@ -14,7 +14,9 @@ CFLAGS = -O2 -Wall -std=gnu99
 CFLAGS += -I$(WEBOS_PDK)/include
 CFLAGS += -I$(WEBOS_PDK)/include/SDL
 CFLAGS += -Iminizip
+CFLAGS += -Iunarr
 CFLAGS += -DIOAPI_NO_64
+CFLAGS += -DHAVE_ZLIB
 
 # Linker flags
 LDFLAGS = -L$(WEBOS_PDK)/device/lib
@@ -26,6 +28,17 @@ LIBS = -lSDL -lSDL_ttf -lSDL_image -lpdl -lz
 # Source files
 SRC = src/main.c src/cbz.c src/cache.c src/ui.c
 SRC += minizip/unzip.c minizip/ioapi.c
+
+# unarr sources for CBR support
+SRC += unarr/common/stream.c unarr/common/unarr.c unarr/common/crc32.c
+SRC += unarr/common/conv.c unarr/common/custalloc.c
+SRC += unarr/rar/rar.c unarr/rar/parse-rar.c unarr/rar/uncompress-rar.c
+SRC += unarr/rar/huffman-rar.c unarr/rar/filter-rar.c unarr/rar/rarvm.c
+# LZMA SDK for RAR decompression
+SRC += unarr/lzmasdk/LzmaDec.c unarr/lzmasdk/Ppmd7.c unarr/lzmasdk/Ppmd7Dec.c
+SRC += unarr/lzmasdk/Ppmd7aDec.c unarr/lzmasdk/Ppmd8.c unarr/lzmasdk/Ppmd8Dec.c
+SRC += unarr/lzmasdk/CpuArch.c
+
 OBJ = $(SRC:.c=.o)
 
 TARGET = $(APP_NAME)
@@ -52,6 +65,6 @@ install: package
 
 # Dependencies
 src/main.o: src/main.c src/ui.h src/cbz.h src/cache.h
-src/cbz.o: src/cbz.c src/cbz.h minizip/unzip.h
+src/cbz.o: src/cbz.c src/cbz.h minizip/unzip.h unarr/unarr.h
 src/cache.o: src/cache.c src/cache.h src/cbz.h
 src/ui.o: src/ui.c src/ui.h src/cbz.h src/cache.h
