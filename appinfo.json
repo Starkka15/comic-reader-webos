@@ -7,5 +7,7 @@
     "title": "Comic Reader",
     "icon": "icon.png",
     "requiredMemory": 64,
-    "uiRevision": 2
+    "uiRevision": 2,
+    "miniicon": "icon.png",
+    "privileges": "media.management"
 }

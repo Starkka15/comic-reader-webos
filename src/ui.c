@@ -391,13 +391,13 @@ int ui_handle_event(UIState *ui, SDL_Event *event) {
                 int clicked_index = (y - 60 + ui->scroll_offset) / 50;
                 if (clicked_index >= 0 && clicked_index < ui->file_count) {
                     FileEntry *entry = &ui->files[clicked_index];
+                    ui->selected_file = clicked_index;
 
                     if (entry->type == ENTRY_PARENT || entry->type == ENTRY_DIRECTORY) {
                         ui_scan_directory(ui, entry->full_path);
                     } else {
                         return 2; // Open comic (handled by main)
                     }
-                    ui->selected_file = clicked_index;
                 }
             }
         }
