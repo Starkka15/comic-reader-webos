@@ -304,18 +304,30 @@ static void render_reader(UIState *ui) {
             SDL_Rect dest = {x, y, 0, 0};
             SDL_BlitSurface(page, NULL, ui->screen, &dest);
         } else {
-            // Zoomed view - apply zoom and pan
-            int zoomed_w = (int)(page->w * ui->zoom);
-            int zoomed_h = (int)(page->h * ui->zoom);
+            // Zoomed view - show a portion of the image at 2x
+            // Calculate the visible area in source coordinates
+            int view_w = SCREEN_WIDTH / 2;  // Half the screen width in source pixels
+            int view_h = (SCREEN_HEIGHT - 40) / 2;  // Half the screen height
 
-            // Center with pan offset
-            int x = (SCREEN_WIDTH - zoomed_w) / 2 + (int)ui->pan_x;
-            int y = (SCREEN_HEIGHT - 40 - zoomed_h) / 2 + (int)ui->pan_y;
+            // Center point with pan offset (in source coordinates)
+            int center_x = page->w / 2 - (int)(ui->pan_x / 2);
+            int center_y = page->h / 2 - (int)(ui->pan_y / 2);
 
-            SDL_Rect src_rect = {0, 0, page->w, page->h};
-            SDL_Rect dst_rect = {x, y, zoomed_w, zoomed_h};
+            // Source rectangle
+            int src_x = center_x - view_w / 2;
+            int src_y = center_y - view_h / 2;
 
-            // Use SoftStretch for zoom
+            // Clamp to image bounds
+            if (src_x < 0) src_x = 0;
+            if (src_y < 0) src_y = 0;
+            if (src_x + view_w > page->w) src_x = page->w - view_w;
+            if (src_y + view_h > page->h) src_y = page->h - view_h;
+            if (src_x < 0) { src_x = 0; view_w = page->w; }
+            if (src_y < 0) { src_y = 0; view_h = page->h; }
+
+            SDL_Rect src_rect = {src_x, src_y, view_w, view_h};
+            SDL_Rect dst_rect = {0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - 40};
+
             SDL_SoftStretch(page, &src_rect, ui->screen, &dst_rect);
         }
 
