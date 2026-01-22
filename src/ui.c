@@ -304,31 +304,57 @@ static void render_reader(UIState *ui) {
             SDL_Rect dest = {x, y, 0, 0};
             SDL_BlitSurface(page, NULL, ui->screen, &dest);
         } else {
-            // Zoomed view - show a portion of the image at 2x
-            // Calculate the visible area in source coordinates
-            int view_w = SCREEN_WIDTH / 2;  // Half the screen width in source pixels
-            int view_h = (SCREEN_HEIGHT - 40) / 2;  // Half the screen height
+            // Zoomed 2x view using manual nearest-neighbor scaling
+            // We show half the source image, scaled to fill the screen
+            int half_src_w = SCREEN_WIDTH / 2;
+            int half_src_h = (SCREEN_HEIGHT - 40) / 2;
 
-            // Center point with pan offset (in source coordinates)
-            int center_x = page->w / 2 - (int)(ui->pan_x / 2);
-            int center_y = page->h / 2 - (int)(ui->pan_y / 2);
+            // Pan offset determines which part of source to show
+            int src_x = (page->w - half_src_w) / 2 - (int)(ui->pan_x / 2);
+            int src_y = (page->h - half_src_h) / 2 - (int)(ui->pan_y / 2);
 
-            // Source rectangle
-            int src_x = center_x - view_w / 2;
-            int src_y = center_y - view_h / 2;
-
-            // Clamp to image bounds
+            // Clamp source position
             if (src_x < 0) src_x = 0;
             if (src_y < 0) src_y = 0;
-            if (src_x + view_w > page->w) src_x = page->w - view_w;
-            if (src_y + view_h > page->h) src_y = page->h - view_h;
-            if (src_x < 0) { src_x = 0; view_w = page->w; }
-            if (src_y < 0) { src_y = 0; view_h = page->h; }
+            if (src_x + half_src_w > page->w) src_x = page->w - half_src_w;
+            if (src_y + half_src_h > page->h) src_y = page->h - half_src_h;
+            if (src_x < 0) src_x = 0;
+            if (src_y < 0) src_y = 0;
 
-            SDL_Rect src_rect = {src_x, src_y, view_w, view_h};
-            SDL_Rect dst_rect = {0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - 40};
+            // Manual 2x nearest-neighbor blit
+            SDL_LockSurface(page);
+            SDL_LockSurface(ui->screen);
 
-            SDL_SoftStretch(page, &src_rect, ui->screen, &dst_rect);
+            int bpp = page->format->BytesPerPixel;
+            int dst_h = SCREEN_HEIGHT - 40;
+
+            for (int dy = 0; dy < dst_h && (dy/2 + src_y) < page->h; dy++) {
+                int sy = src_y + dy / 2;
+                Uint8 *src_row = (Uint8 *)page->pixels + sy * page->pitch;
+                Uint8 *dst_row = (Uint8 *)ui->screen->pixels + dy * ui->screen->pitch;
+
+                for (int dx = 0; dx < SCREEN_WIDTH && (dx/2 + src_x) < page->w; dx++) {
+                    int sx = src_x + dx / 2;
+                    Uint8 *src_pixel = src_row + sx * bpp;
+                    Uint8 *dst_pixel = dst_row + dx * ui->screen->format->BytesPerPixel;
+
+                    // Copy pixel (handle different bpp)
+                    if (bpp == 4 && ui->screen->format->BytesPerPixel == 4) {
+                        *(Uint32 *)dst_pixel = *(Uint32 *)src_pixel;
+                    } else if (bpp == 3) {
+                        dst_pixel[0] = src_pixel[0];
+                        dst_pixel[1] = src_pixel[1];
+                        dst_pixel[2] = src_pixel[2];
+                    }
+                }
+            }
+
+            SDL_UnlockSurface(ui->screen);
+            SDL_UnlockSurface(page);
+
+            // Draw zoom indicator
+            draw_text(ui->screen, ui->font_small, "[2x - drag to pan]",
+                     SCREEN_WIDTH/2 - 70, 10, COLOR_YELLOW);
         }
 
         // Preload adjacent pages
