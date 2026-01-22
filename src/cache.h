@@ -10,6 +10,10 @@
 #define SCREEN_WIDTH 1024
 #define SCREEN_HEIGHT 768
 
+// Cache at higher resolution for zoom quality (1.5x screen)
+#define CACHE_WIDTH 1536
+#define CACHE_HEIGHT 1152
+
 // Cached page entry
 typedef struct {
     int page_index;         // -1 if unused

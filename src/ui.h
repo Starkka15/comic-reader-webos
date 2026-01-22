@@ -60,6 +60,9 @@ typedef struct {
     float zoom;
     float pan_x;
     float pan_y;
+
+    // Orientation (0=landscape, 1=portrait-left, 2=portrait-right, 3=upside-down)
+    int orientation;
 } UIState;
 
 // Initialize/cleanup
@@ -85,5 +88,8 @@ void ui_goto_page(UIState *ui, int page);
 // Screen management
 void ui_set_screen(UIState *ui, ScreenState state);
 void ui_set_message(UIState *ui, const char *message);
+
+// Orientation
+void ui_poll_orientation(UIState *ui);
 
 #endif

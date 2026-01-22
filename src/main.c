@@ -65,6 +65,9 @@ int main(int argc, char *argv[]) {
             }
         }
 
+        // Poll orientation sensor (updates ui.orientation)
+        ui_poll_orientation(&ui);
+
         ui_render(&ui);
         SDL_Delay(16); // ~60 FPS
     }

@@ -128,15 +128,26 @@ static SDL_Surface *load_page(PageCache *cache, int page_index) {
 
     printf("Loaded page %d: %dx%d\n", page_index, original->w, original->h);
 
-    // Scale to screen size
-    SDL_Surface *scaled = scale_surface(original, SCREEN_WIDTH, SCREEN_HEIGHT);
+    // Scale to cache size (larger than screen for zoom quality)
+    SDL_Surface *scaled = scale_surface(original, CACHE_WIDTH, CACHE_HEIGHT);
     SDL_FreeSurface(original); // Free original, keep only scaled
 
-    if (scaled) {
-        printf("Scaled page %d to %dx%d\n", page_index, scaled->w, scaled->h);
+    if (!scaled) {
+        return NULL;
     }
 
-    return scaled;
+    printf("Scaled page %d to %dx%d\n", page_index, scaled->w, scaled->h);
+
+    // Convert to display format for proper colors
+    SDL_Surface *display = SDL_DisplayFormat(scaled);
+    SDL_FreeSurface(scaled);
+
+    if (!display) {
+        fprintf(stderr, "Failed to convert to display format\n");
+        return scaled; // Fall back to unconverted
+    }
+
+    return display;
 }
 
 // Find LRU entry to evict
