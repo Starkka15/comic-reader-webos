@@ -106,10 +106,11 @@ static int compare_files(const void *a, const void *b) {
     return strcasecmp(fa->name, fb->name);
 }
 
-static int is_cbz_file(const char *name) {
+static int is_comic_file(const char *name) {
     const char *ext = strrchr(name, '.');
     if (!ext) return 0;
-    return (strcasecmp(ext, ".cbz") == 0 || strcasecmp(ext, ".zip") == 0);
+    return (strcasecmp(ext, ".cbz") == 0 || strcasecmp(ext, ".zip") == 0 ||
+            strcasecmp(ext, ".cbr") == 0 || strcasecmp(ext, ".rar") == 0);
 }
 
 int ui_scan_directory(UIState *ui, const char *path) {
@@ -158,11 +159,11 @@ int ui_scan_directory(UIState *ui, const char *path) {
         if (S_ISDIR(st.st_mode)) {
             entry->type = ENTRY_DIRECTORY;
             ui->file_count++;
-        } else if (is_cbz_file(de->d_name)) {
+        } else if (is_comic_file(de->d_name)) {
             entry->type = ENTRY_FILE;
             ui->file_count++;
         }
-        // Skip non-CBZ files
+        // Skip non-comic files
     }
 
     closedir(dir);
