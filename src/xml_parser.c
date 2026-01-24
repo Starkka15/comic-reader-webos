@@ -199,6 +199,7 @@ int parse_webdav_response(const char *xml, size_t xml_len, CloudFileList *list) 
 
     const char *pos = xml;
     const char *end = xml + xml_len;
+    int first_entry = 1;  // Skip first entry (it's the queried directory itself)
 
     // Find each <d:response> or <D:response> element
     while (pos < end && list->count < MAX_CLOUD_ENTRIES) {
@@ -232,7 +233,14 @@ int parse_webdav_response(const char *xml, size_t xml_len, CloudFileList *list) 
         // Extract filename from href
         extract_filename(entry->href, entry->name, sizeof(entry->name));
 
-        // Skip if empty name (root directory usually)
+        // Skip first entry (it's the queried directory itself in PROPFIND Depth:1)
+        if (first_entry) {
+            first_entry = 0;
+            pos = resp_end + 1;
+            continue;
+        }
+
+        // Skip if empty name
         if (entry->name[0] == '\0') {
             pos = resp_end + 1;
             continue;

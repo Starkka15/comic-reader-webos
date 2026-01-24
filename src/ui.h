@@ -80,7 +80,8 @@ typedef struct {
     char cloud_path[MAX_PATH_LEN];
     CloudFileList cloud_files;       // From xml_parser.h
     AppConfig cloud_config;          // From config.h
-    int cloud_selected_file;
+    int cloud_selected_file;         // Visual index for highlighting
+    int cloud_actual_file_index;     // Actual index in cloud_files.entries[]
     int cloud_scroll_offset;
     int cloud_configured;            // 1 if config loaded successfully
 
@@ -123,5 +124,6 @@ int ui_scan_cloud_directory(UIState *ui, const char *path);
 int ui_download_comic(UIState *ui, const char *remote_path, char *local_path, size_t local_path_len);
 void ui_load_cloud_config(UIState *ui);
 void ui_save_cloud_config(UIState *ui);
+int ui_clear_cloud_cache(void);
 
 #endif

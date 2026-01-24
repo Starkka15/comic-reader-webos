@@ -114,8 +114,7 @@ int main(int argc, char *argv[]) {
 
                 case 6: // Open cloud comic
                     {
-                        int list_offset = (strcmp(ui.cloud_path, "/") != 0) ? 1 : 0;
-                        int file_index = ui.cloud_selected_file - list_offset;
+                        int file_index = ui.cloud_actual_file_index;
                         if (file_index >= 0 && file_index < ui.cloud_files.count) {
                             CloudFileEntry *entry = &ui.cloud_files.entries[file_index];
 

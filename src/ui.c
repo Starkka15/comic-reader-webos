@@ -147,24 +147,21 @@ void ui_poll_orientation(UIState *ui) {
                 break;
         }
 
-        Uint32 now = SDL_GetTicks();
+        // Update pending orientation based on latest sensor reading
+        if (new_orientation != ui->pending_orientation) {
+            ui->pending_orientation = new_orientation;
+            ui->orientation_change_time = SDL_GetTicks();
+        }
+    }
 
-        if (new_orientation != ui->orientation) {
-            if (new_orientation != ui->pending_orientation) {
-                // New candidate orientation - start timing
-                ui->pending_orientation = new_orientation;
-                ui->orientation_change_time = now;
-            } else if (now - ui->orientation_change_time >= ORIENTATION_DEBOUNCE_MS) {
-                // Stable for long enough - apply change
-                ui->orientation = new_orientation;
-                printf("Orientation: %s\n",
-                       new_orientation == 0 ? "Landscape" :
-                       new_orientation == 1 ? "Portrait Inverted" : "Portrait");
-            }
-            // else: still waiting for debounce period
-        } else {
-            // Current orientation confirmed - reset pending
-            ui->pending_orientation = ui->orientation;
+    // Check debounce timer outside the loop (runs every frame)
+    if (ui->pending_orientation != ui->orientation) {
+        Uint32 now = SDL_GetTicks();
+        if (now - ui->orientation_change_time >= ORIENTATION_DEBOUNCE_MS) {
+            ui->orientation = ui->pending_orientation;
+            printf("Orientation: %s\n",
+                   ui->orientation == 0 ? "Landscape" :
+                   ui->orientation == 1 ? "Portrait Inverted" : "Portrait");
         }
     }
 }
@@ -684,6 +681,10 @@ static void render_cloud_browser(UIState *ui, SDL_Surface *surface, int vw, int 
     snprintf(path_display, sizeof(path_display), "%.50s", ui->cloud_path);
     draw_text(surface, ui->font_small, path_display, 220, 16, COLOR_WHITE);
 
+    // Clear Cache button
+    draw_rect(surface, vw - 180, 8, 80, 34, COLOR_DARK_GRAY);
+    draw_text(surface, ui->font_small, "Clear", vw - 165, 14, COLOR_GRAY);
+
     // Local button
     draw_rect(surface, vw - 90, 8, 80, 34, COLOR_DARK_GRAY);
     draw_text(surface, ui->font_small, "Local", vw - 75, 14, COLOR_YELLOW);
@@ -802,9 +803,14 @@ static void render_cloud_config(UIState *ui, SDL_Surface *surface, int vw, int v
     draw_rect(surface, field_x + (field_width + 20) / 2, start_y, (field_width - 20) / 2, 50, COLOR_DARK_GRAY);
     draw_text(surface, ui->font, "Cancel", field_x + (field_width + 20) / 2 + 50, start_y + 12, COLOR_WHITE);
 
+    // Clear Cache button
+    start_y += 70;
+    draw_rect(surface, field_x, start_y, field_width, 40, COLOR_DARK_GRAY);
+    draw_text(surface, ui->font_small, "Clear Downloaded Comics Cache", field_x + 70, start_y + 10, COLOR_YELLOW);
+
     // Instructions
-    draw_text(surface, ui->font_small, "Tap field to edit, use keyboard to type", vw/2 - 140, vh - 80, COLOR_GRAY);
-    draw_text(surface, ui->font_small, "Example: https://cloud.example.com", vw/2 - 130, vh - 50, COLOR_GRAY);
+    draw_text(surface, ui->font_small, "Tap field to edit, use keyboard to type", vw/2 - 140, vh - 60, COLOR_GRAY);
+    draw_text(surface, ui->font_small, "Example: https://cloud.example.com", vw/2 - 130, vh - 35, COLOR_GRAY);
 }
 
 static void render_loading(UIState *ui, SDL_Surface *surface, int vw, int vh) {
@@ -930,7 +936,10 @@ int ui_handle_event(UIState *ui, SDL_Event *event) {
             if (y < 50 && x > vw - 90) {
                 // Cloud button tapped
                 if (ui->cloud_configured) {
-                    ui->state = SCREEN_CLOUD_BROWSER;
+                    // Reset to root and refresh
+                    strcpy(ui->cloud_path, "/");
+                    ui->browse_mode = 1;
+                    return 5; // Signal to refresh cloud directory
                 } else {
                     // Show config screen
                     strcpy(ui->input_server, ui->cloud_config.server_url);
@@ -938,8 +947,8 @@ int ui_handle_event(UIState *ui, SDL_Event *event) {
                     strcpy(ui->input_password, ui->cloud_config.password);
                     ui->config_input_field = 0;
                     ui->state = SCREEN_CLOUD_CONFIG;
+                    return 0;
                 }
-                return 0;
             }
 
             // File selection
@@ -1004,6 +1013,19 @@ int ui_handle_event(UIState *ui, SDL_Event *event) {
             return 3; // Back to browser
         }
         else if (ui->state == SCREEN_CLOUD_BROWSER && !ui->touch_moved) {
+            // Check Clear Cache button in header
+            if (y < 50 && x >= vw - 180 && x <= vw - 100) {
+                int cleared = ui_clear_cloud_cache();
+                if (cleared > 0) {
+                    char msg[64];
+                    snprintf(msg, sizeof(msg), "Cleared %d cached comic%s", cleared, cleared == 1 ? "" : "s");
+                    ui_set_message(ui, msg);
+                } else {
+                    ui_set_message(ui, "Cache is empty");
+                }
+                return 0;
+            }
+
             // Check Local button in header
             if (y < 50 && x > vw - 90) {
                 ui->state = SCREEN_BROWSER;
@@ -1012,11 +1034,11 @@ int ui_handle_event(UIState *ui, SDL_Event *event) {
 
             // File selection
             if (y > 50 && y < vh - 30) {
-                int list_offset = (strcmp(ui->cloud_path, "/") != 0) ? 1 : 0;
-                int clicked_index = (y - 60 + ui->cloud_scroll_offset) / 50;
+                int clicked_visual_index = (y - 60 + ui->cloud_scroll_offset) / 50;
+                int has_parent = (strcmp(ui->cloud_path, "/") != 0) ? 1 : 0;
 
                 // Check if parent directory was clicked
-                if (list_offset > 0 && clicked_index == 0) {
+                if (has_parent && clicked_visual_index == 0) {
                     // Go to parent directory
                     char *last_slash = strrchr(ui->cloud_path, '/');
                     if (last_slash && last_slash != ui->cloud_path) {
@@ -1027,11 +1049,27 @@ int ui_handle_event(UIState *ui, SDL_Event *event) {
                     return 5; // Signal to refresh cloud directory
                 }
 
-                // Adjust for parent directory offset
-                int file_index = clicked_index - list_offset;
-                if (file_index >= 0 && file_index < ui->cloud_files.count) {
-                    CloudFileEntry *entry = &ui->cloud_files.entries[file_index];
-                    ui->cloud_selected_file = clicked_index;
+                // Map visual index to actual file index (accounting for skipped non-comic files)
+                int target_visual = clicked_visual_index - has_parent;
+                int visual_count = 0;
+                int actual_index = -1;
+
+                for (int i = 0; i < ui->cloud_files.count; i++) {
+                    CloudFileEntry *entry = &ui->cloud_files.entries[i];
+                    // Only count items that are actually displayed
+                    if (entry->type == CLOUD_ENTRY_DIRECTORY || is_cloud_comic_file(entry->name)) {
+                        if (visual_count == target_visual) {
+                            actual_index = i;
+                            break;
+                        }
+                        visual_count++;
+                    }
+                }
+
+                if (actual_index >= 0) {
+                    CloudFileEntry *entry = &ui->cloud_files.entries[actual_index];
+                    ui->cloud_selected_file = clicked_visual_index;
+                    ui->cloud_actual_file_index = actual_index;
 
                     if (entry->type == CLOUD_ENTRY_DIRECTORY) {
                         // Navigate into directory
@@ -1097,6 +1135,22 @@ int ui_handle_event(UIState *ui, SDL_Event *event) {
                 y >= start_y && y <= start_y + 50) {
                 PDL_SetKeyboardState(PDL_FALSE);
                 ui->state = SCREEN_BROWSER;
+                return 0;
+            }
+
+            // Clear Cache button
+            start_y += 70;
+            if (x >= field_x && x <= field_x + field_width &&
+                y >= start_y && y <= start_y + 40) {
+                PDL_SetKeyboardState(PDL_FALSE);
+                int cleared = ui_clear_cloud_cache();
+                if (cleared > 0) {
+                    char msg[64];
+                    snprintf(msg, sizeof(msg), "Cleared %d cached comic%s", cleared, cleared == 1 ? "" : "s");
+                    ui_set_message(ui, msg);
+                } else {
+                    ui_set_message(ui, "Cache is already empty");
+                }
                 return 0;
             }
 
@@ -1234,4 +1288,30 @@ void ui_save_cloud_config(UIState *ui) {
     } else {
         fprintf(stderr, "Failed to save cloud config\n");
     }
+}
+
+int ui_clear_cloud_cache(void) {
+    DIR *dir = opendir(CLOUD_CACHE_DIR);
+    if (!dir) {
+        return 0; // No cache directory, nothing to clear
+    }
+
+    int count = 0;
+    struct dirent *entry;
+    char filepath[512];
+
+    while ((entry = readdir(dir)) != NULL) {
+        // Skip . and ..
+        if (entry->d_name[0] == '.') continue;
+
+        snprintf(filepath, sizeof(filepath), "%s/%s", CLOUD_CACHE_DIR, entry->d_name);
+        if (remove(filepath) == 0) {
+            count++;
+            printf("Deleted cached comic: %s\n", entry->d_name);
+        }
+    }
+
+    closedir(dir);
+    printf("Cleared %d cached comics\n", count);
+    return count;
 }
