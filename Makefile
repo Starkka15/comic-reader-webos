@@ -23,10 +23,10 @@ LDFLAGS = -L$(WEBOS_PDK)/device/lib
 LDFLAGS += -Wl,--allow-shlib-undefined
 
 # Libraries
-LIBS = -lSDL -lSDL_ttf -lSDL_image -lpdl -lz
+LIBS = -lSDL -lSDL_ttf -lSDL_image -lpdl -lz -lcurl -lssl -lcrypto
 
 # Source files
-SRC = src/main.c src/cbz.c src/cache.c src/ui.c
+SRC = src/main.c src/cbz.c src/cache.c src/ui.c src/webdav.c src/config.c src/xml_parser.c
 SRC += minizip/unzip.c minizip/ioapi.c
 
 # unarr sources for CBR support

@@ -5,18 +5,27 @@
 #include <SDL_ttf.h>
 #include "cbz.h"
 #include "cache.h"
+#include "config.h"
+#include "xml_parser.h"
 
 #define SCREEN_WIDTH 1024
 #define SCREEN_HEIGHT 768
 
 #define MAX_FILES 500
+#ifndef MAX_PATH_LEN
 #define MAX_PATH_LEN 512
+#endif
+
+// Orientation debounce time in milliseconds
+#define ORIENTATION_DEBOUNCE_MS 400
 
 typedef enum {
     SCREEN_BROWSER,
     SCREEN_READER,
     SCREEN_LOADING,
-    SCREEN_ERROR
+    SCREEN_ERROR,
+    SCREEN_CLOUD_BROWSER,
+    SCREEN_CLOUD_CONFIG
 } ScreenState;
 
 typedef enum {
@@ -61,8 +70,25 @@ typedef struct {
     float pan_x;
     float pan_y;
 
-    // Orientation (0=landscape, 1=portrait-left, 2=portrait-right, 3=upside-down)
+    // Orientation (0=landscape, 1=portrait-left, 2=portrait-right)
     int orientation;
+    int pending_orientation;         // Orientation we're considering switching to
+    Uint32 orientation_change_time;  // When pending_orientation was first detected
+
+    // Cloud browser state
+    int browse_mode;                 // 0=local, 1=cloud
+    char cloud_path[MAX_PATH_LEN];
+    CloudFileList cloud_files;       // From xml_parser.h
+    AppConfig cloud_config;          // From config.h
+    int cloud_selected_file;
+    int cloud_scroll_offset;
+    int cloud_configured;            // 1 if config loaded successfully
+
+    // Config screen input state
+    int config_input_field;          // 0=server, 1=username, 2=password
+    char input_server[512];
+    char input_username[128];
+    char input_password[256];
 } UIState;
 
 // Initialize/cleanup
@@ -91,5 +117,11 @@ void ui_set_message(UIState *ui, const char *message);
 
 // Orientation
 void ui_poll_orientation(UIState *ui);
+
+// Cloud browser
+int ui_scan_cloud_directory(UIState *ui, const char *path);
+int ui_download_comic(UIState *ui, const char *remote_path, char *local_path, size_t local_path_len);
+void ui_load_cloud_config(UIState *ui);
+void ui_save_cloud_config(UIState *ui);
 
 #endif

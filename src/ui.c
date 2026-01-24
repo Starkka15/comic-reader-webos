@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "webdav.h"
 #include <PDL.h>
 #include <PDL_Sensors.h>
 #include <stdio.h>
@@ -6,6 +7,11 @@
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <errno.h>
+
+// Cache directory for downloaded comics
+#define CLOUD_CACHE_DIR "/media/internal/.comic-cache"
+#define CONFIG_FILE_PATH "/media/internal/.comic-reader/config.txt"
 
 // Colors
 static SDL_Color COLOR_WHITE = {255, 255, 255, 255};
@@ -67,6 +73,9 @@ int ui_init(UIState *ui) {
         return -1;
     }
 
+    // Enable unicode for virtual keyboard input
+    SDL_EnableUNICODE(1);
+
     if (TTF_Init() < 0) {
         fprintf(stderr, "TTF_Init failed: %s\n", TTF_GetError());
         return -1;
@@ -83,7 +92,15 @@ int ui_init(UIState *ui) {
     ui->state = SCREEN_BROWSER;
     ui->zoom = 1.0f;
     ui->orientation = 0;  // Landscape
-    strcpy(ui->current_dir, "/media/internal");
+    ui->pending_orientation = 0;
+    ui->orientation_change_time = 0;
+    strcpy(ui->current_dir, "/media/internal/comics");
+
+    // Cloud browser state
+    ui->browse_mode = 0;  // Start in local mode
+    strcpy(ui->cloud_path, "/");
+    ui->cloud_configured = 0;
+    config_init(&ui->cloud_config);
 
     // Enable orientation sensor
     if (PDL_SensorExists(PDL_SENSOR_ORIENTATION)) {
@@ -91,10 +108,14 @@ int ui_init(UIState *ui) {
         printf("Orientation sensor enabled\n");
     }
 
+    // Create cache directory if needed
+    mkdir(CLOUD_CACHE_DIR, 0755);
+    mkdir("/media/internal/.comic-reader", 0755);
+
     return 0;
 }
 
-// Poll orientation sensor and update state
+// Poll orientation sensor and update state with debounce
 void ui_poll_orientation(UIState *ui) {
     PDL_SensorEvent sensor_event;
 
@@ -102,7 +123,8 @@ void ui_poll_orientation(UIState *ui) {
     while (PDL_PollSensor(PDL_SENSOR_ORIENTATION, &sensor_event) == PDL_NOERROR &&
            sensor_event.type != PDL_SENSOR_NONE) {
 
-        int new_orientation = sensor_event.orientation.orientation;
+        int raw_orientation = sensor_event.orientation.orientation;
+        int new_orientation;
 
         // Map PDL orientation to our values
         // TouchPad PDL orientations:
@@ -111,27 +133,38 @@ void ui_poll_orientation(UIState *ui) {
         //   LEFT_SIDE_DOWN (5) = landscape, home button on left
         //   RIGHT_SIDE_DOWN (6) = landscape, home button on right
         // Our values: 0=landscape (no rotation), 1=portrait-left, 2=portrait-right
-        switch (new_orientation) {
+        switch (raw_orientation) {
             case PDL_SENSOR_ORIENTATION_NORMAL:  // Portrait, home at bottom
-                if (ui->orientation != 2) {
-                    ui->orientation = 2;  // Rotate content for portrait
-                    printf("Orientation: Portrait (home bottom)\n");
-                }
+                new_orientation = 2;
                 break;
             case PDL_SENSOR_ORIENTATION_UP_SIDE_DOWN:  // Portrait, home at top
-                if (ui->orientation != 1) {
-                    ui->orientation = 1;  // Rotate content for inverted portrait
-                    printf("Orientation: Portrait Inverted (home top)\n");
-                }
+                new_orientation = 1;
                 break;
             case PDL_SENSOR_ORIENTATION_LEFT_SIDE_DOWN:  // Landscape
             case PDL_SENSOR_ORIENTATION_RIGHT_SIDE_DOWN:  // Landscape
             default:
-                if (ui->orientation != 0) {
-                    ui->orientation = 0;  // Landscape (no rotation)
-                    printf("Orientation: Landscape\n");
-                }
+                new_orientation = 0;
                 break;
+        }
+
+        Uint32 now = SDL_GetTicks();
+
+        if (new_orientation != ui->orientation) {
+            if (new_orientation != ui->pending_orientation) {
+                // New candidate orientation - start timing
+                ui->pending_orientation = new_orientation;
+                ui->orientation_change_time = now;
+            } else if (now - ui->orientation_change_time >= ORIENTATION_DEBOUNCE_MS) {
+                // Stable for long enough - apply change
+                ui->orientation = new_orientation;
+                printf("Orientation: %s\n",
+                       new_orientation == 0 ? "Landscape" :
+                       new_orientation == 1 ? "Portrait Inverted" : "Portrait");
+            }
+            // else: still waiting for debounce period
+        } else {
+            // Current orientation confirmed - reset pending
+            ui->pending_orientation = ui->orientation;
         }
     }
 }
@@ -405,8 +438,12 @@ static void render_browser(UIState *ui, SDL_Surface *surface, int vw, int vh) {
 
     // Current path
     char path_display[64];
-    snprintf(path_display, sizeof(path_display), "%.60s", ui->current_dir);
-    draw_text(surface, ui->font_small, path_display, 200, 16, COLOR_WHITE);
+    snprintf(path_display, sizeof(path_display), "%.45s", ui->current_dir);
+    draw_text(surface, ui->font_small, path_display, 180, 16, COLOR_WHITE);
+
+    // Cloud button
+    draw_rect(surface, vw - 90, 8, 80, 34, COLOR_DARK_GRAY);
+    draw_text(surface, ui->font_small, "Cloud", vw - 75, 14, COLOR_YELLOW);
 
     // File list
     int y = 60 - ui->scroll_offset;
@@ -629,6 +666,147 @@ static void render_reader(UIState *ui, SDL_Surface *surface, int vw, int vh) {
     draw_text(surface, ui->font_small, "[Back]", vw - 80, vh - 30, COLOR_YELLOW);
 }
 
+// Check if a filename is a comic file
+static int is_cloud_comic_file(const char *name) {
+    const char *ext = strrchr(name, '.');
+    if (!ext) return 0;
+    return (strcasecmp(ext, ".cbz") == 0 || strcasecmp(ext, ".zip") == 0 ||
+            strcasecmp(ext, ".cbr") == 0 || strcasecmp(ext, ".rar") == 0);
+}
+
+static void render_cloud_browser(UIState *ui, SDL_Surface *surface, int vw, int vh) {
+    // Header
+    draw_rect(surface, 0, 0, vw, 50, COLOR_BLUE);
+    draw_text(surface, ui->font, "Nextcloud Comics", 20, 12, COLOR_WHITE);
+
+    // Current cloud path
+    char path_display[64];
+    snprintf(path_display, sizeof(path_display), "%.50s", ui->cloud_path);
+    draw_text(surface, ui->font_small, path_display, 220, 16, COLOR_WHITE);
+
+    // Local button
+    draw_rect(surface, vw - 90, 8, 80, 34, COLOR_DARK_GRAY);
+    draw_text(surface, ui->font_small, "Local", vw - 75, 14, COLOR_YELLOW);
+
+    // File list
+    int y = 60 - ui->cloud_scroll_offset;
+    int item_height = 50;
+
+    // Add parent directory if not at root
+    if (strcmp(ui->cloud_path, "/") != 0 && y + item_height >= 50) {
+        if (0 == ui->cloud_selected_file) {
+            draw_rect(surface, 0, y, vw, item_height - 2, COLOR_DARK_GRAY);
+        }
+        draw_text(surface, ui->font, "[..]", 15, y + 12, COLOR_GRAY);
+        draw_text(surface, ui->font, "..", 70, y + 12, COLOR_YELLOW);
+        y += item_height;
+    }
+
+    int list_offset = (strcmp(ui->cloud_path, "/") != 0) ? 1 : 0;
+
+    for (int i = 0; i < ui->cloud_files.count; i++) {
+        if (y + item_height < 50) {
+            y += item_height;
+            continue;
+        }
+        if (y > vh) break;
+
+        CloudFileEntry *entry = &ui->cloud_files.entries[i];
+
+        // Skip non-comic files (but show directories)
+        if (entry->type == CLOUD_ENTRY_FILE && !is_cloud_comic_file(entry->name)) {
+            continue;
+        }
+
+        // Selection highlight
+        if (i + list_offset == ui->cloud_selected_file) {
+            draw_rect(surface, 0, y, vw, item_height - 2, COLOR_DARK_GRAY);
+        }
+
+        // Icon/indicator
+        const char *icon = "";
+        SDL_Color name_color = COLOR_WHITE;
+
+        if (entry->type == CLOUD_ENTRY_DIRECTORY) {
+            icon = "[D]";
+            name_color = COLOR_YELLOW;
+        } else {
+            icon = "[C]";
+            name_color = COLOR_WHITE;
+        }
+
+        draw_text(surface, ui->font, icon, 15, y + 12, COLOR_GRAY);
+        draw_text(surface, ui->font, entry->name, 70, y + 12, name_color);
+
+        y += item_height;
+    }
+
+    // Scroll indicator
+    int total_items = ui->cloud_files.count + list_offset;
+    if (total_items > 12) {
+        int total_height = total_items * item_height;
+        int visible_height = vh - 50;
+        int bar_height = (visible_height * visible_height) / total_height;
+        if (bar_height < 30) bar_height = 30;
+        int bar_y = 50 + (ui->cloud_scroll_offset * (visible_height - bar_height)) / (total_height - visible_height);
+        draw_rect(surface, vw - 8, bar_y, 6, bar_height, COLOR_GRAY);
+    }
+
+    // Instructions
+    draw_rect(surface, 0, vh - 30, vw, 30, COLOR_DARK_GRAY);
+    draw_text(surface, ui->font_small, "Tap to select | Swipe to scroll", 20, vh - 24, COLOR_GRAY);
+}
+
+static void render_cloud_config(UIState *ui, SDL_Surface *surface, int vw, int vh) {
+    // Title
+    draw_text(surface, ui->font, "Nextcloud Setup", vw/2 - 80, 60, COLOR_WHITE);
+
+    int field_width = 400;
+    int field_x = (vw - field_width) / 2;
+    int start_y = 140;
+
+    // Server URL field
+    draw_text(surface, ui->font_small, "Server URL:", field_x, start_y, COLOR_GRAY);
+    draw_rect(surface, field_x, start_y + 25, field_width, 40,
+              ui->config_input_field == 0 ? COLOR_BLUE : COLOR_DARK_GRAY);
+    draw_text(surface, ui->font, ui->input_server[0] ? ui->input_server : "https://...", field_x + 10, start_y + 32, COLOR_WHITE);
+
+    // Username field
+    start_y += 90;
+    draw_text(surface, ui->font_small, "Username:", field_x, start_y, COLOR_GRAY);
+    draw_rect(surface, field_x, start_y + 25, field_width, 40,
+              ui->config_input_field == 1 ? COLOR_BLUE : COLOR_DARK_GRAY);
+    draw_text(surface, ui->font, ui->input_username, field_x + 10, start_y + 32, COLOR_WHITE);
+
+    // Password field
+    start_y += 90;
+    draw_text(surface, ui->font_small, "Password:", field_x, start_y, COLOR_GRAY);
+    draw_rect(surface, field_x, start_y + 25, field_width, 40,
+              ui->config_input_field == 2 ? COLOR_BLUE : COLOR_DARK_GRAY);
+    // Mask password
+    char masked[256];
+    int pass_len = strlen(ui->input_password);
+    if (pass_len > 255) pass_len = 255;
+    memset(masked, '*', pass_len);
+    masked[pass_len] = '\0';
+    draw_text(surface, ui->font, masked, field_x + 10, start_y + 32, COLOR_WHITE);
+
+    // Buttons
+    start_y += 100;
+
+    // Connect button
+    draw_rect(surface, field_x, start_y, (field_width - 20) / 2, 50, COLOR_BLUE);
+    draw_text(surface, ui->font, "Connect", field_x + 50, start_y + 12, COLOR_WHITE);
+
+    // Cancel button
+    draw_rect(surface, field_x + (field_width + 20) / 2, start_y, (field_width - 20) / 2, 50, COLOR_DARK_GRAY);
+    draw_text(surface, ui->font, "Cancel", field_x + (field_width + 20) / 2 + 50, start_y + 12, COLOR_WHITE);
+
+    // Instructions
+    draw_text(surface, ui->font_small, "Tap field to edit, use keyboard to type", vw/2 - 140, vh - 80, COLOR_GRAY);
+    draw_text(surface, ui->font_small, "Example: https://cloud.example.com", vw/2 - 130, vh - 50, COLOR_GRAY);
+}
+
 static void render_loading(UIState *ui, SDL_Surface *surface, int vw, int vh) {
     draw_text(surface, ui->font, ui->message, vw/2 - 60, vh/2, COLOR_WHITE);
 }
@@ -660,6 +838,12 @@ void ui_render(UIState *ui) {
             break;
         case SCREEN_ERROR:
             render_error(ui, surface, vw, vh);
+            break;
+        case SCREEN_CLOUD_BROWSER:
+            render_cloud_browser(ui, surface, vw, vh);
+            break;
+        case SCREEN_CLOUD_CONFIG:
+            render_cloud_config(ui, surface, vw, vh);
             break;
     }
 
@@ -702,19 +886,22 @@ int ui_handle_event(UIState *ui, SDL_Event *event) {
             ui->touch_moved = 1;
         }
 
-        // Scrolling in browser
-        if (ui->state == SCREEN_BROWSER && abs(dy) > 10) {
-            ui->scroll_offset -= dy;
+        // Scrolling in browser (local or cloud)
+        if ((ui->state == SCREEN_BROWSER || ui->state == SCREEN_CLOUD_BROWSER) && abs(dy) > 10) {
+            int *scroll_ptr = (ui->state == SCREEN_BROWSER) ? &ui->scroll_offset : &ui->cloud_scroll_offset;
+            int item_count = (ui->state == SCREEN_BROWSER) ? ui->file_count : ui->cloud_files.count;
+
+            *scroll_ptr -= dy;
             ui->touch_start_x = tx;
             ui->touch_start_y = ty;
 
             // Clamp scroll - use virtual height
             int vw, vh;
             get_virtual_size(ui, &vw, &vh);
-            int max_scroll = ui->file_count * 50 - (vh - 80);
+            int max_scroll = item_count * 50 - (vh - 80);
             if (max_scroll < 0) max_scroll = 0;
-            if (ui->scroll_offset < 0) ui->scroll_offset = 0;
-            if (ui->scroll_offset > max_scroll) ui->scroll_offset = max_scroll;
+            if (*scroll_ptr < 0) *scroll_ptr = 0;
+            if (*scroll_ptr > max_scroll) *scroll_ptr = max_scroll;
         }
 
         // Panning when zoomed in reader
@@ -739,6 +926,22 @@ int ui_handle_event(UIState *ui, SDL_Event *event) {
         get_virtual_size(ui, &vw, &vh);
 
         if (ui->state == SCREEN_BROWSER && !ui->touch_moved) {
+            // Check Cloud button in header
+            if (y < 50 && x > vw - 90) {
+                // Cloud button tapped
+                if (ui->cloud_configured) {
+                    ui->state = SCREEN_CLOUD_BROWSER;
+                } else {
+                    // Show config screen
+                    strcpy(ui->input_server, ui->cloud_config.server_url);
+                    strcpy(ui->input_username, ui->cloud_config.username);
+                    strcpy(ui->input_password, ui->cloud_config.password);
+                    ui->config_input_field = 0;
+                    ui->state = SCREEN_CLOUD_CONFIG;
+                }
+                return 0;
+            }
+
             // File selection
             if (y > 50 && y < vh - 30) {
                 int clicked_index = (y - 60 + ui->scroll_offset) / 50;
@@ -800,6 +1003,106 @@ int ui_handle_event(UIState *ui, SDL_Event *event) {
         else if (ui->state == SCREEN_ERROR) {
             return 3; // Back to browser
         }
+        else if (ui->state == SCREEN_CLOUD_BROWSER && !ui->touch_moved) {
+            // Check Local button in header
+            if (y < 50 && x > vw - 90) {
+                ui->state = SCREEN_BROWSER;
+                return 0;
+            }
+
+            // File selection
+            if (y > 50 && y < vh - 30) {
+                int list_offset = (strcmp(ui->cloud_path, "/") != 0) ? 1 : 0;
+                int clicked_index = (y - 60 + ui->cloud_scroll_offset) / 50;
+
+                // Check if parent directory was clicked
+                if (list_offset > 0 && clicked_index == 0) {
+                    // Go to parent directory
+                    char *last_slash = strrchr(ui->cloud_path, '/');
+                    if (last_slash && last_slash != ui->cloud_path) {
+                        *last_slash = '\0';
+                    } else {
+                        strcpy(ui->cloud_path, "/");
+                    }
+                    return 5; // Signal to refresh cloud directory
+                }
+
+                // Adjust for parent directory offset
+                int file_index = clicked_index - list_offset;
+                if (file_index >= 0 && file_index < ui->cloud_files.count) {
+                    CloudFileEntry *entry = &ui->cloud_files.entries[file_index];
+                    ui->cloud_selected_file = clicked_index;
+
+                    if (entry->type == CLOUD_ENTRY_DIRECTORY) {
+                        // Navigate into directory
+                        if (strcmp(ui->cloud_path, "/") == 0) {
+                            snprintf(ui->cloud_path, sizeof(ui->cloud_path), "/%s", entry->name);
+                        } else {
+                            char temp[MAX_PATH_LEN];
+                            snprintf(temp, sizeof(temp), "%s/%s", ui->cloud_path, entry->name);
+                            strncpy(ui->cloud_path, temp, sizeof(ui->cloud_path) - 1);
+                        }
+                        return 5; // Signal to refresh cloud directory
+                    } else if (is_cloud_comic_file(entry->name)) {
+                        return 6; // Open cloud comic (handled by main)
+                    }
+                }
+            }
+        }
+        else if (ui->state == SCREEN_CLOUD_CONFIG && !ui->touch_moved) {
+            int field_width = 400;
+            int field_x = (vw - field_width) / 2;
+            int start_y = 140;
+
+            // Server URL field
+            if (x >= field_x && x <= field_x + field_width &&
+                y >= start_y + 25 && y <= start_y + 65) {
+                ui->config_input_field = 0;
+                PDL_SetKeyboardState(PDL_TRUE);
+                return 0;
+            }
+
+            // Username field
+            start_y += 90;
+            if (x >= field_x && x <= field_x + field_width &&
+                y >= start_y + 25 && y <= start_y + 65) {
+                ui->config_input_field = 1;
+                PDL_SetKeyboardState(PDL_TRUE);
+                return 0;
+            }
+
+            // Password field
+            start_y += 90;
+            if (x >= field_x && x <= field_x + field_width &&
+                y >= start_y + 25 && y <= start_y + 65) {
+                ui->config_input_field = 2;
+                PDL_SetKeyboardState(PDL_TRUE);
+                return 0;
+            }
+
+            // Connect button
+            start_y += 100;
+            if (x >= field_x && x <= field_x + (field_width - 20) / 2 &&
+                y >= start_y && y <= start_y + 50) {
+                PDL_SetKeyboardState(PDL_FALSE);
+                // Copy input to config and signal connection attempt
+                strcpy(ui->cloud_config.server_url, ui->input_server);
+                strcpy(ui->cloud_config.username, ui->input_username);
+                strcpy(ui->cloud_config.password, ui->input_password);
+                return 4; // Signal to test connection
+            }
+
+            // Cancel button
+            if (x >= field_x + (field_width + 20) / 2 && x <= field_x + field_width &&
+                y >= start_y && y <= start_y + 50) {
+                PDL_SetKeyboardState(PDL_FALSE);
+                ui->state = SCREEN_BROWSER;
+                return 0;
+            }
+
+            // Tap outside fields dismisses keyboard
+            PDL_SetKeyboardState(PDL_FALSE);
+        }
     }
 
     // Keyboard (for testing/hardware keyboard)
@@ -816,8 +1119,119 @@ int ui_handle_event(UIState *ui, SDL_Event *event) {
             if (event->key.keysym.sym == SDLK_ESCAPE) {
                 return 1; // Quit
             }
+        } else if (ui->state == SCREEN_CLOUD_BROWSER) {
+            if (event->key.keysym.sym == SDLK_ESCAPE) {
+                ui->state = SCREEN_BROWSER;
+            }
+        } else if (ui->state == SCREEN_CLOUD_CONFIG) {
+            char *target = NULL;
+            int max_len = 0;
+
+            switch (ui->config_input_field) {
+                case 0: target = ui->input_server; max_len = sizeof(ui->input_server) - 1; break;
+                case 1: target = ui->input_username; max_len = sizeof(ui->input_username) - 1; break;
+                case 2: target = ui->input_password; max_len = sizeof(ui->input_password) - 1; break;
+            }
+
+            if (target) {
+                int len = strlen(target);
+                SDLKey key = event->key.keysym.sym;
+
+                if (key == SDLK_BACKSPACE && len > 0) {
+                    target[len - 1] = '\0';
+                }
+                else if (key == SDLK_RETURN) {
+                    if (ui->config_input_field == 2) {
+                        // On password field, dismiss keyboard
+                        PDL_SetKeyboardState(PDL_FALSE);
+                    } else {
+                        // Move to next field
+                        ui->config_input_field = (ui->config_input_field + 1) % 3;
+                    }
+                }
+                else if (key == SDLK_TAB) {
+                    ui->config_input_field = (ui->config_input_field + 1) % 3;
+                }
+                else if (key == SDLK_ESCAPE) {
+                    PDL_SetKeyboardState(PDL_FALSE);
+                    ui->state = SCREEN_BROWSER;
+                }
+                else {
+                    // Use unicode value for proper virtual keyboard support
+                    Uint16 unicode = event->key.keysym.unicode;
+                    if (unicode >= 32 && unicode < 127 && len < max_len) {
+                        target[len] = (char)unicode;
+                        target[len + 1] = '\0';
+                    }
+                }
+            }
         }
     }
 
     return 0;
+}
+
+// Cloud browser functions
+
+int ui_scan_cloud_directory(UIState *ui, const char *path) {
+    filelist_init(&ui->cloud_files);
+    ui->cloud_scroll_offset = 0;
+    ui->cloud_selected_file = 0;
+
+    if (webdav_list_directory(&ui->cloud_config, path, &ui->cloud_files) != 0) {
+        fprintf(stderr, "Failed to list cloud directory: %s\n", webdav_get_error());
+        return -1;
+    }
+
+    return 0;
+}
+
+int ui_download_comic(UIState *ui, const char *remote_path, char *local_path, size_t local_path_len) {
+    // Extract filename from remote path
+    const char *filename = strrchr(remote_path, '/');
+    if (filename) {
+        filename++; // Skip the slash
+    } else {
+        filename = remote_path;
+    }
+
+    // Build local cache path
+    snprintf(local_path, local_path_len, "%s/%s", CLOUD_CACHE_DIR, filename);
+
+    // Check if already cached
+    struct stat st;
+    if (stat(local_path, &st) == 0) {
+        printf("Using cached comic: %s\n", local_path);
+        return 0; // Already exists
+    }
+
+    // Download the file
+    printf("Downloading: %s -> %s\n", remote_path, local_path);
+    if (webdav_download_file(&ui->cloud_config, remote_path, local_path, NULL, NULL) != 0) {
+        fprintf(stderr, "Download failed: %s\n", webdav_get_error());
+        return -1;
+    }
+
+    return 0;
+}
+
+void ui_load_cloud_config(UIState *ui) {
+    if (config_load(&ui->cloud_config, CONFIG_FILE_PATH) == 0) {
+        // Config loaded successfully
+        if (ui->cloud_config.server_url[0] != '\0' &&
+            ui->cloud_config.username[0] != '\0') {
+            ui->cloud_configured = 1;
+            printf("Loaded cloud config: %s@%s\n",
+                   ui->cloud_config.username, ui->cloud_config.server_url);
+        }
+    }
+}
+
+void ui_save_cloud_config(UIState *ui) {
+    ui->cloud_config.remember_password = 1;
+    if (config_save(&ui->cloud_config, CONFIG_FILE_PATH) == 0) {
+        printf("Cloud config saved\n");
+    } else {
+        fprintf(stderr, "Failed to save cloud config\n");
+    }
 }
