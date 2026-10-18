@@ -1,0 +1,18 @@
+{
+	"id": "org.webos.comicreader",
+	"version": "0.1.0",
+	"vendor": "webOS Community",
+	"type": "web",
+	"main": "index.html",
+	"title": "Comic Reader",
+	"icon": "images/icon.png",
+	"splashicon": "images/icon-256x256.png",
+	"uiRevision": 2,
+	"keywords": ["Comics", "CBZ", "CBR", "OPDS"],
+	"mimeTypes": [
+		{ "mime": "application/vnd.comicbook+zip", "extension": "cbz" },
+		{ "mime": "application/vnd.comicbook-rar", "extension": "cbr" },
+		{ "mime": "application/x-cb7", "extension": "cb7" },
+		{ "mime": "application/x-cbt", "extension": "cbt" }
+	]
+}

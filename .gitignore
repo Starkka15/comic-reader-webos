@@ -12,3 +12,6 @@ comic-reader
 # OS files
 .DS_Store
 Thumbs.db
+
+# Build output
+build/

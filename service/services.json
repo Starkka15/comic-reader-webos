@@ -1,0 +1,24 @@
+{
+	"id": "org.webos.comicreader.service",
+	"description": "Finds comics, takes pages out of them and downloads from catalogs for the Comic Reader app",
+	"engine": "node",
+	"activityTimeout": 120,
+	"services": [
+		{
+			"name": "org.webos.comicreader.service",
+			"globalized": false,
+			"commands": [
+				{ "name": "scan", "assistant": "scanAssistant", "public": true },
+				{ "name": "open", "assistant": "openAssistant", "public": true },
+				{ "name": "page", "assistant": "pageAssistant", "public": true },
+				{ "name": "cover", "assistant": "coverAssistant", "public": true },
+				{ "name": "remove", "assistant": "removeAssistant", "public": true },
+				{ "name": "feed", "assistant": "feedAssistant", "public": true },
+				{ "name": "serverCover", "assistant": "serverCoverAssistant", "public": true },
+				{ "name": "download", "assistant": "downloadAssistant", "public": true },
+				{ "name": "progress", "assistant": "progressAssistant", "public": true },
+				{ "name": "cancel", "assistant": "cancelAssistant", "public": true }
+			]
+		}
+	]
+}

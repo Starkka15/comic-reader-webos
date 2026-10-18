@@ -1,0 +1,9 @@
+{
+	"app": "org.webos.comicreader",
+	"id": "org.webos.comicreader",
+	"loc_name": "Comic Reader",
+	"package_format_version": 2,
+	"services": ["org.webos.comicreader.service"],
+	"vendor": "webOS Community",
+	"version": "0.1.0"
+}

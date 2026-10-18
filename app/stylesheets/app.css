@@ -1,0 +1,282 @@
+/* Comic Reader. Dark throughout, so covers and pages stand out. */
+
+.cr-app {
+	background: #17181c;
+	color: #e6e6e6;
+}
+
+/* The stock theme assumes a light page: popups and grouped rows set no text
+   color of their own. */
+.enyo-popup, .enyo-popup .enyo-item {
+	color: #2b2f36;
+}
+
+.enyo-group-inner, .enyo-group-inner .enyo-item, .enyo-group-inner input {
+	color: #2b2f36;
+}
+
+/* ---- bars ---- */
+
+.cr-bar {
+	height: 54px;
+	padding: 0 8px;
+	background: #2b2b2b;
+	background: -webkit-gradient(linear, left top, left bottom, from(#454545), to(#262626));
+	border-bottom: 1px solid #0c0c0c;
+	-webkit-box-sizing: border-box;
+	box-sizing: border-box;
+}
+
+.cr-bar-title {
+	padding: 0 10px;
+	font-size: 20px;
+	color: #fff;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.cr-sides {
+	width: 380px;
+	margin-left: 14px;
+}
+
+.cr-tools {
+	padding: 6px 10px;
+	background: #202126;
+	border-bottom: 1px solid #0c0c0c;
+}
+
+.cr-where {
+	padding: 0 12px;
+	font-size: 18px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.cr-server-search {
+	width: 280px;
+}
+
+.cr-note {
+	padding: 26px;
+	text-align: center;
+	color: #9a9a9a;
+}
+
+/* ---- the shelf ---- */
+
+.cr-shelf-row {
+	padding: 0 6px;
+}
+
+.cr-tile {
+	width: 170px;
+	height: 292px;
+	padding: 14px 10px 0;
+	text-align: center;
+	-webkit-box-sizing: border-box;
+	box-sizing: border-box;
+}
+
+.cr-tile-empty {
+	visibility: hidden;
+}
+
+/* The cover, or a letter on a dark card until there is one. */
+.cr-art {
+	width: 140px;
+	height: 196px;
+	margin: 0 auto;
+	overflow: hidden;
+	background-color: #2a2c33;
+	background-repeat: no-repeat;
+	background-position: center center;
+	-webkit-background-size: contain;
+	border: 1px solid #3a3d46;
+	-webkit-box-sizing: border-box;
+	box-sizing: border-box;
+}
+
+.cr-letter {
+	line-height: 194px;
+	font-size: 64px;
+	color: #50545f;
+}
+
+.cr-title {
+	max-height: 34px;
+	margin-top: 7px;
+	overflow: hidden;
+	font-size: 13px;
+	line-height: 17px;
+	word-wrap: break-word;
+}
+
+.cr-sub {
+	font-size: 12px;
+	line-height: 16px;
+	color: #9a9a9a;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.cr-badge {
+	font-size: 11px;
+	line-height: 15px;
+	color: #6fb3ff;
+	white-space: nowrap;
+	overflow: hidden;
+}
+
+/* ---- a server's lists ---- */
+
+.cr-list-row {
+	padding: 14px 16px;
+	border-color: #2c2e35;
+}
+
+.cr-list-title {
+	font-size: 18px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.cr-list-sub {
+	padding-left: 14px;
+	font-size: 14px;
+	color: #9a9a9a;
+	white-space: nowrap;
+}
+
+.cr-signin {
+	max-width: 560px;
+	margin: 0 auto;
+	padding: 26px 20px 40px;
+}
+
+.cr-signin-title {
+	font-size: 22px;
+	padding-bottom: 8px;
+}
+
+.cr-signin-text {
+	padding-bottom: 14px;
+	font-size: 15px;
+	color: #a8a8a8;
+}
+
+.cr-problem {
+	padding: 4px 4px 12px;
+	font-size: 15px;
+	color: #ff8a80;
+}
+
+/* ---- dialogs ---- */
+
+.cr-dialog-text {
+	padding: 2px 0 14px;
+	font-size: 16px;
+}
+
+.cr-dialog-buttons {
+	margin-top: 14px;
+}
+
+.cr-detail-art {
+	width: 150px;
+	height: 210px;
+	margin-right: 14px;
+	background-color: #e4e4e4;
+	background-repeat: no-repeat;
+	background-position: center center;
+	-webkit-background-size: contain;
+}
+
+.cr-detail-author {
+	font-size: 17px;
+	padding-bottom: 6px;
+}
+
+.cr-detail-text {
+	font-size: 14px;
+	padding-bottom: 6px;
+}
+
+.cr-detail-tags {
+	font-size: 13px;
+	color: #6a6f7a;
+}
+
+/* ---- downloading ---- */
+
+.cr-getting {
+	padding: 6px 10px;
+	background: #202126;
+	border-top: 1px solid #0c0c0c;
+}
+
+.cr-getting-text {
+	padding: 0 4px 4px;
+	font-size: 14px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* ---- the reader ---- */
+
+.cr-reader {
+	position: relative;
+	background: #000;
+}
+
+/* The reader's bars, laid over the top and bottom of the page. */
+.cr-bar-over-top {
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 0;
+}
+
+.cr-bar-over-bottom {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	border-bottom: none;
+	border-top: 1px solid #0c0c0c;
+}
+
+.cr-stage {
+	background: #000;
+}
+
+.cr-page {
+	display: block;
+}
+
+/* Words over the page while it is on its way. */
+.cr-wait {
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 45%;
+	padding: 0 30px;
+	text-align: center;
+	font-size: 18px;
+	color: #b8b8b8;
+}
+
+.cr-count {
+	padding: 0 12px;
+	font-size: 15px;
+	white-space: nowrap;
+}
+
+.cr-slider {
+	margin: 0 12px;
+}
