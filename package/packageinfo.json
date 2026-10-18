@@ -5,5 +5,5 @@
 	"package_format_version": 2,
 	"services": ["org.webos.comicreader.service"],
 	"vendor": "webOS Community",
-	"version": "0.1.0"
+	"version": "0.2.0"
 }
